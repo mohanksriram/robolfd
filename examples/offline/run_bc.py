@@ -68,6 +68,12 @@ class PolicyNet(nn.Module):
                 torch.exp(self.logstd)[None],
             )
 
+# TODO: Add code to replay demonstrations
+
+# Create the networks
+network = None
+
+
 # get_action method should be move to a separate actor
 
 

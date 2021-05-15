@@ -4,7 +4,9 @@ import numpy as np
 from numpy import ndarray
 from pathlib import Path
 
+from typing import List
 import random
+from robolfd.types import Transition
 import robosuite
 from robosuite.utils.mjcf_utils import postprocess_model_xml
 
@@ -27,9 +29,10 @@ def make_demonstrations(demo_path: Path) -> ndarray:
         control_freq=20,
     )
     
-    observations = []
+    observations: List[Transition] = []
 
     # TODO: Decide how to batch observations across episodes
+    # Dataset is collected in the form of transitions.
     for episode in episodes:
         # each demo is considered to be an episode
 
@@ -44,6 +47,10 @@ def make_demonstrations(demo_path: Path) -> ndarray:
 
         for j, action in enumerate(actions):
             observation, reward, done, misc = env.step(action)
-            observations.append(observation)
-
-    return np.array(zip(observations, actions))
+            trans = Transition()
+            observations.append(Transition(observation, action, reward, None, None))
+            if j > 0:
+                # update o_tp1 for the previous observation
+                observations[j-1].next_observation = observation
+            
+    return np.array(observations)

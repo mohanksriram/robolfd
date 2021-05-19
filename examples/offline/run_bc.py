@@ -8,6 +8,8 @@ from robolfd.utils import counting
 from robolfd.utils import loggers
 from examples.offline import bc_robo_utils
 
+from absl import app
+from absl import flags
 import numpy as np
 import torch
 from torch import nn
@@ -16,7 +18,12 @@ from torch import distributions
 from typing import cast
 
 results_dir = "/home/mohan/research/experiments/bc/"
-demo_path = "/home/mohan/Downloads/panda_nut_assembly_square/demo.hdf5"
+demo_path = "/home/mohan/Downloads/1620492100_4904742/demo.hdf5"
+
+flags.DEFINE_integer('amp_factor', 5, 'amplification factor')
+flags.DEFINE_integer('amp_start', -80, 'start time step for range to be amplified.')
+flags.DEFINE_integer('amp_end', -20, 'start time step for range to be amplified.')
+flags.DEFINE_boolean('train', 1, 'whether to train a model or evaluate a model')
 
 import time
 
@@ -88,77 +95,85 @@ class PolicyNet(nn.Module):
             action_distribution.sample().cpu().detach().numpy(),
         )[0]
 
-start = time.time()
-# TODO: Save demonstrations in reverb
-dataset = bc_robo_utils.make_demonstrations(demo_path)
-demo_time = time.time()
+FLAGS = flags.FLAGS
 
-print(f"demo took {demo_time-start} seconds.")
+def main(_):
+    start = time.time()
 
-obs, action = dataset[0][0], dataset[1][0]
-ob_dim = len(obs)
-ac_dim = len(action)
-n_layers = 4
-size = 32
-learning_rate = 0.001
-num_train_iterations = 250000
-batch_size = 32
-eval_steps = 250
+    # TODO: Save demonstrations in reverb
+    demo_config = bc_robo_utils.DemoConfig(FLAGS.amp_factor, FLAGS.amp_start, FLAGS.amp_end, not FLAGS.train)
+    dataset = bc_robo_utils.make_demonstrations(demo_path, demo_config)
+    demo_time = time.time()
 
-counter = counting.Counter()
-learner_counter = counting.Counter(counter, prefix='learner')
+    print(f"demo took {demo_time-start} seconds.")
 
-print(f"len of generated dataset: {len(dataset[0])}")
+    obs, action = dataset[0][0], dataset[1][0]
+    ob_dim = len(obs)
+    ac_dim = len(action)
+    n_layers = 4
+    size = 32
+    learning_rate = 0.001
+    num_train_iterations = 250000
+    batch_size = 32
+    eval_steps = 250
 
+    counter = counting.Counter()
+    learner_counter = counting.Counter(counter, prefix='learner')
 
-# Create the networks
-policy_network = PolicyNet(
-                ac_dim=ac_dim,
-                ob_dim=ob_dim,
-                n_layers=n_layers,
-                size=size)
-
-learner = bc.BCLearner(network=policy_network,
-                       learning_rate=0.01,
-                       dataset=dataset, 
-                       counter=learner_counter, 
-                       logger=loggers.TerminalLogger('training', time_delta=0.))
+    print(f"len of generated dataset: {len(dataset[0])}")
 
 
-# get_action method should be move to a separate actor
-# for iter in range(num_train_iterations):
-#     learner.step()
-training_time = time.time()
-print(f"training took {training_time-demo_time} seconds.")
+    # Create the networks
+    policy_network = PolicyNet(
+                    ac_dim=ac_dim,
+                    ob_dim=ob_dim,
+                    n_layers=n_layers,
+                    size=size)
 
-print(f"saving the model at {results_dir}net.pt")
-learner.save(results_dir + f"net.pt")
+    learner = bc.BCLearner(network=policy_network,
+                        learning_rate=0.01,
+                        dataset=dataset, 
+                        counter=learner_counter, 
+                        logger=loggers.TerminalLogger('training', time_delta=0.))
 
-# TODO: Convert evaluation loop to an actor
-eval_policy_net = PolicyNet(
-                ac_dim=ac_dim,
-                ob_dim=ob_dim,
-                n_layers=n_layers,
-                size=size)
 
-eval_env = bc_robo_utils.make_eval_env(demo_path)
+    # get_action method should be move to a separate actor
+    if FLAGS.train:
+        for iter in range(num_train_iterations):
+            learner.step()
+        training_time = time.time()
+        print(f"training took {training_time-demo_time} seconds.")
 
-# TODO: Move evaluation code to appropriate file
-full_obs = eval_env.reset()
-flat_obs = np.append(full_obs["robot0_proprio-state"], (full_obs["object-state"]))
-action = eval_policy_net.get_action(flat_obs)
+        print(f"saving the model at {results_dir}net.pt")
+        learner.save(results_dir + f"net.pt")
 
-for i in range(eval_steps):
-    # act and observe
-    obs, reward, done, _ = eval_env.step(action)
-    eval_env.render()
-    
-    # compute next action
+    # TODO: Convert evaluation loop to an actor
+    eval_policy_net = PolicyNet(
+                    ac_dim=ac_dim,
+                    ob_dim=ob_dim,
+                    n_layers=n_layers,
+                    size=size)
+    eval_policy_net.load_state_dict(torch.load(results_dir + f"net.pt"))
+
+    eval_env = bc_robo_utils.make_eval_env(demo_path)
+    # TODO: Move evaluation code to appropriate file
+    full_obs = eval_env.reset()
     flat_obs = np.append(full_obs["robot0_proprio-state"], (full_obs["object-state"]))
     action = eval_policy_net.get_action(flat_obs)
-    if done:
-        break 
 
+    for i in range(eval_steps):
+        # act and observe
+        obs, reward, done, _ = eval_env.step(action)
+        eval_env.render()
+        
+        # compute next action
+        flat_obs = np.append(full_obs["robot0_proprio-state"], (full_obs["object-state"]))
+        action = eval_policy_net.get_action(flat_obs)
+        if done:
+            break 
+
+if __name__ == '__main__':
+  app.run(main)
 
 
 

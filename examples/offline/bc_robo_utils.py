@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import h5py
 import json
 import numpy as np
@@ -12,7 +13,17 @@ from robosuite.utils.mjcf_utils import postprocess_model_xml
 
 from tqdm import tqdm
 
-def make_demonstrations(demo_path: Path) -> ndarray:
+@dataclass
+class DemoConfig:
+    amp_factor: int
+    amp_start: int
+    amp_end: int
+    last_episode_only: int
+
+    def __str__(self) -> str:
+        return f"my config, amp_factor: {self.amp_factor}, amp_start: {self.amp_start}, amp_end: {self.amp_end}, last_episode_only: {self.last_episode_only}"
+
+def make_demonstrations(demo_path: Path, config: DemoConfig) -> ndarray:
     f = h5py.File(demo_path, "r")
 
     env_name = f["data"].attrs["env"]
@@ -30,6 +41,8 @@ def make_demonstrations(demo_path: Path) -> ndarray:
         control_freq=20,
     )
     
+    print(config)
+
     transitions: List[Transition] = []
 
     # TODO: Decide how to batch transitions across episodes
@@ -37,7 +50,7 @@ def make_demonstrations(demo_path: Path) -> ndarray:
     all_actions = []
     all_observations = []
 
-    for i, episode in enumerate(tqdm(episodes[:1])):
+    for i, episode in enumerate(tqdm(episodes[-config.last_episode_only:])):
         # each demo is considered to be an episode
 
         model_xml = f[f"data/{episode}"].attrs["model_file"]
@@ -59,6 +72,14 @@ def make_demonstrations(demo_path: Path) -> ndarray:
         
         all_observations.extend(flat_observations)
         all_actions.extend(actions)
+
+        amplified_observations = config.amp_factor*flat_observations[-config.amp_start: -config.amp_end]
+        amplified_actions = config.amp_factor*actions[-config.amp_start: -config.amp_end]
+
+        # duplicate last few transitions to include more gripper closing action.
+        all_observations.extend(amplified_observations)
+        all_actions.extend(amplified_actions)
+
 
     return (all_observations, all_actions)
 

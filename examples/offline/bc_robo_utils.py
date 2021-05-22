@@ -111,19 +111,23 @@ def make_demonstrations(demo_path: Path, config: DemoConfig) -> ndarray:
         merged = list(itertools.chain(*transitions))
         return merged
 
-def make_eval_env(demo_path: Path):
+def make_eval_env(demo_path: Path, has_offscreen_renderer = True):
     f = h5py.File(demo_path, "r")
 
     env_name = f["data"].attrs["env"]
     env_info = json.loads(f["data"].attrs["env_info"])
 
+    
     env = robosuite.make(
         **env_info,
-        has_renderer=True,
-        has_offscreen_renderer=False,
+        has_renderer=not has_offscreen_renderer,
+        has_offscreen_renderer=has_offscreen_renderer,
         ignore_done=True,
-        use_camera_obs=False,
+        use_camera_obs=has_offscreen_renderer,
         reward_shaping=True,
         control_freq=20,
+        camera_names="frontview",
+        camera_heights=512,
+        camera_widths=512,
     )
     return env

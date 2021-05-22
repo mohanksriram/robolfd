@@ -1,5 +1,6 @@
-robosuite
 absl-py
 dm-tree
+imageio-ffmpeg
 h5pickle
+robosuite
 tqdm

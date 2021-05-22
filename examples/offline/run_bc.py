@@ -10,6 +10,7 @@ from examples.offline import bc_robo_utils
 
 from absl import app
 from absl import flags
+import imageio
 import numpy as np
 import torch
 from torch import nn
@@ -17,15 +18,17 @@ from torch import distributions
 
 from typing import cast
 
-results_dir = "/home/mohan/research/experiments/bc/panda_lift/"
+results_dir = "/home/mohan/research/experiments/bc/panda_lift/models/"
 demo_path = "/home/mohan/Downloads/panda_pick_up/1620492100_4904742/demo.hdf5"
 
 flags.DEFINE_boolean('train', 1, 'whether to train a model or evaluate a model')
 flags.DEFINE_integer('max_episodes', 100, 'maximum number of episodes to be used for training.')
 flags.DEFINE_integer('train_iterations', 250000, 'number of training iterations.')
-flags.DEFINE_integer('batch_size', 256, 'batch size for training update.')
+flags.DEFINE_integer('batch_size', 512, 'batch size for training update.')
 flags.DEFINE_integer('num_actors', 4, 'number of actors enacting the demonstrations.')
+flags.DEFINE_float('evaluate_factor', 1/20, 'percentage of evaluations compared to train iterations.')
 flags.DEFINE_boolean('gpu', 1, 'whether to run on a gpu.')
+flags.DEFINE_string('video_path', '/tmp/', 'where to store the rollouts.')
 
 
 flags.DEFINE_integer('amp_factor', 0, 'amplification factor')
@@ -124,7 +127,7 @@ def main(_):
     ac_dim = len(action)
     n_layers = 2 # Change to 2
     size = 300
-    learning_rate = 0.01
+    learning_rate = 5e-3
     num_train_iterations = FLAGS.train_iterations
     batch_size = FLAGS.batch_size
     eval_steps = 250
@@ -141,7 +144,7 @@ def main(_):
                     ob_dim=ob_dim,
                     n_layers=n_layers,
                     size=size)
-
+    policy_network.train()
     learner = bc.BCLearner(network=policy_network,
                         learning_rate=learning_rate,
                         dataset=dataset,
@@ -150,43 +153,56 @@ def main(_):
                         logger=loggers.TerminalLogger('training', time_delta=0.),
                         use_gpu=FLAGS.gpu)
 
-    model_checkpoint_name = f"{FLAGS.max_episodes}episodes__{num_train_iterations}steps_{batch_size}bs_net.pt"
     # get_action method should be move to a separate actor
+    evaluate_every = int(num_train_iterations * FLAGS.evaluate_factor)
+
     if FLAGS.train:
+        # TODO: Convert evaluation loop to an actor
+        eval_policy_net = PolicyNet(
+                        ac_dim=ac_dim,
+                        ob_dim=ob_dim,
+                        n_layers=n_layers,
+                        size=size)
+        eval_env = bc_robo_utils.make_eval_env(demo_path)
+        
         for iter in range(num_train_iterations):
             learner.step()
+
+            if iter % evaluate_every == 0:
+                model_checkpoint_name = f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_net.pt"
+                learner.save(results_dir + model_checkpoint_name)
+
+                eval_policy_net.load_state_dict(torch.load(results_dir + model_checkpoint_name))
+                eval_policy_net.eval()
+
+                # TODO: Move evaluation code to appropriate file
+                full_obs = eval_env.reset()
+                flat_obs = np.append(full_obs["robot0_proprio-state"], (full_obs["object-state"]))
+                action = eval_policy_net.get_action(flat_obs)
+                
+                video_path = FLAGS.video_path + f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_video.mp4"
+                # create a video writer with imageio
+                writer = imageio.get_writer(video_path, fps=20)
+
+                for i in range(eval_steps):
+                    # act and observe
+                    obs, reward, done, _ = eval_env.step(action)
+                    # eval_env.render()
+                    # compute next action
+                    flat_obs = np.append(full_obs["robot0_proprio-state"], (full_obs["object-state"]))
+                    action = eval_policy_net.get_action(flat_obs)
+
+                    # dump a frame from every K frames
+                    if i % 1 == 0:
+                        frame = obs["frontview_image"]
+                        frame = np.flip(frame, 0)
+                        writer.append_data(frame)
+
+                    if done:
+                        break 
+
         training_time = time.time()
         print(f"training took {training_time-demo_time} seconds.")
-
-        print(f"saving the model at {results_dir}{num_train_iterations}_net.pt")
-        learner.save(results_dir + model_checkpoint_name)
-
-    # TODO: Convert evaluation loop to an actor
-    eval_policy_net = PolicyNet(
-                    ac_dim=ac_dim,
-                    ob_dim=ob_dim,
-                    n_layers=n_layers,
-                    size=size)
-    
-    eval_policy_net.load_state_dict(torch.load(results_dir + model_checkpoint_name))
-
-    eval_env = bc_robo_utils.make_eval_env(demo_path)
-    # TODO: Move evaluation code to appropriate file
-    full_obs = eval_env.reset()
-    flat_obs = np.append(full_obs["robot0_proprio-state"], (full_obs["object-state"]))
-    action = eval_policy_net.get_action(flat_obs)
-
-    # TODO: Do eval after certain training steps
-    for i in range(eval_steps):
-        # act and observe
-        obs, reward, done, _ = eval_env.step(action)
-        eval_env.render()
-        
-        # compute next action
-        flat_obs = np.append(full_obs["robot0_proprio-state"], (full_obs["object-state"]))
-        action = eval_policy_net.get_action(flat_obs)
-        if done:
-            break 
 
 if __name__ == '__main__':
   app.run(main)

@@ -45,7 +45,8 @@ class BCLearner(robolfd.Learner):
         self._logger = logger
 
         # Get an iterator over the dataset.
-        self._dataset = dataset
+        observations, actions = dataset
+        self._observations, self._actions = np.array(observations), np.array(actions)
         self._learning_rate = learning_rate
         self._batch_size = batch_size
 
@@ -72,7 +73,7 @@ class BCLearner(robolfd.Learner):
 
     def _step(self):
         self._optimizer.zero_grad()
-        transitions: Transition = self.sample_bs(self._dataset, self._batch_size)
+        transitions: Transition = self.sample_bs()
         observations = transitions[0]
         torch_observations = torch.tensor(observations, device='cpu', dtype=torch.float)
 
@@ -99,16 +100,17 @@ class BCLearner(robolfd.Learner):
         # Update our counts and record it.
         counts = self._counter.increment(steps=1)
         result.update(counts)
-
+        if counts["learner_steps"] % 500 == 0:
+            print(result)
         # Attempt to write logs.
-        self._logger.write(result)
+        # self._logger.write(result)
     
     def save(self, filepath):
         torch.save(self._network.state_dict(), filepath)
 
-    def sample_bs(self, dataset, batch_size: int):
-        sample_indices = np.random.permutation(len(dataset))[:batch_size]
-        return dataset[sample_indices]
+    def sample_bs(self):
+        sample_indices = np.random.permutation(len(self._observations))[:self._batch_size]
+        return (self._observations[sample_indices], self._actions[sample_indices])
 
     def get_variables(self, names: List[str]) -> List[np.ndarray]:
         #TODO

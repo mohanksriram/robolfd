@@ -58,9 +58,15 @@ def make_demonstrations(demo_path: Path, config: DemoConfig) -> ndarray:
         xml = postprocess_model_xml(model_xml)
         env.reset_from_xml_string(xml)
         env.sim.reset()
-
+        
+        # TODO: start from state
         states = f[f"data/{episode}/states"][()]
+
         actions = np.array(f[f"data/{episode}/actions"][()])
+
+         # load the initial state
+        env.sim.set_state_from_flattened(states[0])
+        env.sim.forward()
 
         observations = []
         for j, action in enumerate(actions):
@@ -69,7 +75,8 @@ def make_demonstrations(demo_path: Path, config: DemoConfig) -> ndarray:
 
         flat_observations = [np.append(observation["robot0_proprio-state"], (observation["object-state"]))
                              for observation in observations]
-        
+
+        # z
         all_observations.extend(flat_observations)
         all_actions.extend(actions)
 

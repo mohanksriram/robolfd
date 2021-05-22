@@ -24,6 +24,7 @@ flags.DEFINE_integer('amp_factor', 5, 'amplification factor')
 flags.DEFINE_integer('amp_start', -80, 'start time step for range to be amplified.')
 flags.DEFINE_integer('amp_end', -20, 'start time step for range to be amplified.')
 flags.DEFINE_boolean('train', 1, 'whether to train a model or evaluate a model')
+flags.DEFINE_integer('train_iterations', 250000, 'number of training iterations.')
 
 import time
 
@@ -110,10 +111,10 @@ def main(_):
     obs, action = dataset[0][0], dataset[1][0]
     ob_dim = len(obs)
     ac_dim = len(action)
-    n_layers = 4
-    size = 32
-    learning_rate = 0.001
-    num_train_iterations = 250000
+    n_layers = 4 # Change to 2
+    size = 32 # Change to 300
+    learning_rate = 0.01
+    num_train_iterations = FLAGS.train_iterations
     batch_size = 32
     eval_steps = 250
 
@@ -131,8 +132,9 @@ def main(_):
                     size=size)
 
     learner = bc.BCLearner(network=policy_network,
-                        learning_rate=0.01,
-                        dataset=dataset, 
+                        learning_rate=learning_rate,
+                        dataset=dataset,
+                        batch_size=batch_size, 
                         counter=learner_counter, 
                         logger=loggers.TerminalLogger('training', time_delta=0.))
 
@@ -144,8 +146,8 @@ def main(_):
         training_time = time.time()
         print(f"training took {training_time-demo_time} seconds.")
 
-        print(f"saving the model at {results_dir}net.pt")
-        learner.save(results_dir + f"net.pt")
+        print(f"saving the model at {results_dir}_{num_train_iterations}net.pt")
+        learner.save(results_dir + f"{num_train_iterations}_net.pt")
 
     # TODO: Convert evaluation loop to an actor
     eval_policy_net = PolicyNet(
@@ -154,6 +156,8 @@ def main(_):
                     n_layers=n_layers,
                     size=size)
     eval_policy_net.load_state_dict(torch.load(results_dir + f"net.pt"))
+    
+    eval_policy_net.load_state_dict(torch.load(results_dir + f"{num_train_iterations}_net.pt"))
 
     eval_env = bc_robo_utils.make_eval_env(demo_path)
     # TODO: Move evaluation code to appropriate file
@@ -161,6 +165,7 @@ def main(_):
     flat_obs = np.append(full_obs["robot0_proprio-state"], (full_obs["object-state"]))
     action = eval_policy_net.get_action(flat_obs)
 
+    # TODO: Do eval after certain training steps
     for i in range(eval_steps):
         # act and observe
         obs, reward, done, _ = eval_env.step(action)

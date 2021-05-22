@@ -18,7 +18,7 @@ class FeedForwardActor(core.Actor):
 
   def __init__(
       self,
-      policy_network: snt.Module,
+      policy_network: nn.Module,
       adder: Optional[adders.Adder] = None,
       variable_client: Optional[tf2_variable_utils.VariableClient] = None,
   ):

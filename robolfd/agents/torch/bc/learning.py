@@ -29,6 +29,7 @@ class BCLearner(robolfd.Learner):
                  counter,
                  logger: loggers.Logger,
                  batch_size = 32,
+                 use_gpu = 1,
                  checkpoint: bool = True):
         """Intializes the learner.
 
@@ -43,9 +44,10 @@ class BCLearner(robolfd.Learner):
 
         self._counter = counter or counting.Counter()
         self._logger = logger
+        self._use_gpu = use_gpu
 
         # Get an iterator over the dataset.
-        observations, actions = dataset
+        observations, actions = zip(*dataset)
         self._observations, self._actions = np.array(observations), np.array(actions)
         self._learning_rate = learning_rate
         self._batch_size = batch_size
@@ -75,10 +77,11 @@ class BCLearner(robolfd.Learner):
         self._optimizer.zero_grad()
         transitions: Transition = self.sample_bs()
         observations = transitions[0]
-        torch_observations = torch.tensor(observations, device='cpu', dtype=torch.float)
+        device = torch.device('cuda:0') if self._use_gpu else 'cpu'
+        torch_observations = torch.tensor(observations, device=device, dtype=torch.float)
 
         torch_actions = torch.tensor(
-            transitions[1], device='cpu',
+            transitions[1], device=device,
             dtype=torch.int if self._discrete else torch.float)
 
         action_distribution = self._network(torch_observations)
@@ -100,7 +103,7 @@ class BCLearner(robolfd.Learner):
         # Update our counts and record it.
         counts = self._counter.increment(steps=1)
         result.update(counts)
-        if counts["learner_steps"] % 500 == 0:
+        if counts["learner_steps"] % 10000 == 0:
             print(result)
         # Attempt to write logs.
         # self._logger.write(result)

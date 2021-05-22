@@ -17,14 +17,20 @@ from torch import distributions
 
 from typing import cast
 
-results_dir = "/home/mohan/research/experiments/bc/"
-demo_path = "/home/mohan/Downloads/1620492100_4904742/demo.hdf5"
+results_dir = "/home/mohan/research/experiments/bc/panda_lift/"
+demo_path = "/home/mohan/Downloads/panda_pick_up/1620492100_4904742/demo.hdf5"
 
-flags.DEFINE_integer('amp_factor', 5, 'amplification factor')
+flags.DEFINE_boolean('train', 1, 'whether to train a model or evaluate a model')
+flags.DEFINE_integer('max_episodes', 100, 'maximum number of episodes to be used for training.')
+flags.DEFINE_integer('train_iterations', 250000, 'number of training iterations.')
+flags.DEFINE_integer('batch_size', 256, 'batch size for training update.')
+flags.DEFINE_integer('num_actors', 4, 'number of actors enacting the demonstrations.')
+flags.DEFINE_boolean('gpu', 1, 'whether to run on a gpu.')
+
+
+flags.DEFINE_integer('amp_factor', 0, 'amplification factor')
 flags.DEFINE_integer('amp_start', -80, 'start time step for range to be amplified.')
 flags.DEFINE_integer('amp_end', -20, 'start time step for range to be amplified.')
-flags.DEFINE_boolean('train', 1, 'whether to train a model or evaluate a model')
-flags.DEFINE_integer('train_iterations', 250000, 'number of training iterations.')
 
 import time
 
@@ -101,27 +107,32 @@ FLAGS = flags.FLAGS
 def main(_):
     start = time.time()
 
+    if FLAGS.gpu:
+        ptu.init_gpu()
+
     # TODO: Save demonstrations in reverb
-    demo_config = bc_robo_utils.DemoConfig(FLAGS.amp_factor, FLAGS.amp_start, FLAGS.amp_end, not FLAGS.train)
+    demo_config = bc_robo_utils.DemoConfig(FLAGS.amp_factor, FLAGS.amp_start,
+                  FLAGS.amp_end, not FLAGS.train, FLAGS.max_episodes, FLAGS.num_actors)
     dataset = bc_robo_utils.make_demonstrations(demo_path, demo_config)
+    # dataset = zip(*dataset)
     demo_time = time.time()
 
     print(f"demo took {demo_time-start} seconds.")
 
-    obs, action = dataset[0][0], dataset[1][0]
+    obs, action = dataset[0]
     ob_dim = len(obs)
     ac_dim = len(action)
-    n_layers = 4 # Change to 2
-    size = 32 # Change to 300
+    n_layers = 2 # Change to 2
+    size = 300
     learning_rate = 0.01
     num_train_iterations = FLAGS.train_iterations
-    batch_size = 32
+    batch_size = FLAGS.batch_size
     eval_steps = 250
 
     counter = counting.Counter()
     learner_counter = counting.Counter(counter, prefix='learner')
 
-    print(f"len of generated dataset: {len(dataset[0])}")
+    print(f"len of generated dataset: {len(dataset)}")
 
 
     # Create the networks
@@ -136,9 +147,10 @@ def main(_):
                         dataset=dataset,
                         batch_size=batch_size, 
                         counter=learner_counter, 
-                        logger=loggers.TerminalLogger('training', time_delta=0.))
+                        logger=loggers.TerminalLogger('training', time_delta=0.),
+                        use_gpu=FLAGS.gpu)
 
-
+    model_checkpoint_name = f"{FLAGS.max_episodes}episodes__{num_train_iterations}steps_{batch_size}bs_net.pt"
     # get_action method should be move to a separate actor
     if FLAGS.train:
         for iter in range(num_train_iterations):
@@ -146,8 +158,8 @@ def main(_):
         training_time = time.time()
         print(f"training took {training_time-demo_time} seconds.")
 
-        print(f"saving the model at {results_dir}_{num_train_iterations}net.pt")
-        learner.save(results_dir + f"{num_train_iterations}_net.pt")
+        print(f"saving the model at {results_dir}{num_train_iterations}_net.pt")
+        learner.save(results_dir + model_checkpoint_name)
 
     # TODO: Convert evaluation loop to an actor
     eval_policy_net = PolicyNet(
@@ -155,9 +167,8 @@ def main(_):
                     ob_dim=ob_dim,
                     n_layers=n_layers,
                     size=size)
-    eval_policy_net.load_state_dict(torch.load(results_dir + f"net.pt"))
     
-    eval_policy_net.load_state_dict(torch.load(results_dir + f"{num_train_iterations}_net.pt"))
+    eval_policy_net.load_state_dict(torch.load(results_dir + model_checkpoint_name))
 
     eval_env = bc_robo_utils.make_eval_env(demo_path)
     # TODO: Move evaluation code to appropriate file

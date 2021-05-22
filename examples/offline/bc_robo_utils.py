@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-import h5py
+import h5pickle as h5py
 import json
 import numpy as np
 from numpy import ndarray
@@ -28,8 +28,8 @@ class DemoConfig:
         return f"my config, amp_factor: {self.amp_factor}, amp_start: {self.amp_start}, amp_end: {self.amp_end}, last_episode_only: {self.last_episode_only}"
 
 def generate_episode_transitions(demo_info):
-    demo_path, episode_num, config = demo_info
-    f = h5py.File(demo_path, "r")
+    f, episode_num, config = demo_info
+    # f = h5py.File(demo_path, "r")
     
     episodes = list(f["data"].keys())
     episode = episodes[episode_num]
@@ -90,7 +90,7 @@ def generate_episode_transitions(demo_info):
 
 
 def make_demonstrations(demo_path: Path, config: DemoConfig) -> ndarray:
-    f = h5py.File(demo_path, "r")
+    f = h5py.File(demo_path, "r", skip_cache=False)
 
     episodes = list(f["data"].keys())[:config.max_episodes]
     episodes = episodes[-config.last_episode_only:]
@@ -104,7 +104,7 @@ def make_demonstrations(demo_path: Path, config: DemoConfig) -> ndarray:
         # simple pool usage
         # transitions = pool.map(generate_episode_transitions, [(demo_path, i, config) for i in range(len(episodes))])
         # for measuring progress:
-        res = [pool.apply_async(generate_episode_transitions, args=((demo_path, i, config),),
+        res = [pool.apply_async(generate_episode_transitions, args=((f, i, config),),
                        callback=lambda _: pbar.update(1)) for i in range(len(episodes))]
         transitions = [p.get() for p in res]
         pool.close()

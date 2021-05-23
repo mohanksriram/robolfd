@@ -24,9 +24,9 @@ demo_path = "/home/mohan/Downloads/panda_pick_up/1620492100_4904742/demo.hdf5"
 flags.DEFINE_boolean('train', 1, 'whether to train a model or evaluate a model')
 flags.DEFINE_integer('max_episodes', 100, 'maximum number of episodes to be used for training.')
 flags.DEFINE_integer('train_iterations', 250000, 'number of training iterations.')
-flags.DEFINE_integer('batch_size', 512, 'batch size for training update.')
+flags.DEFINE_integer('batch_size', 32, 'batch size for training update.')
 flags.DEFINE_integer('num_actors', 4, 'number of actors enacting the demonstrations.')
-flags.DEFINE_float('evaluate_factor', 1/20, 'percentage of evaluations compared to train iterations.')
+flags.DEFINE_float('evaluate_factor', 1/4, 'percentage of evaluations compared to train iterations.')
 flags.DEFINE_boolean('gpu', 1, 'whether to run on a gpu.')
 flags.DEFINE_string('video_path', '/tmp/', 'where to store the rollouts.')
 
@@ -126,8 +126,8 @@ def main(_):
     ob_dim = len(obs)
     ac_dim = len(action)
     n_layers = 2 # Change to 2
-    size = 300
-    learning_rate = 5e-3
+    size = 128
+    learning_rate = 1e-2
     num_train_iterations = FLAGS.train_iterations
     batch_size = FLAGS.batch_size
     eval_steps = 250
@@ -177,7 +177,8 @@ def main(_):
 
                 # TODO: Move evaluation code to appropriate file
                 full_obs = eval_env.reset()
-                flat_obs = np.append(full_obs["robot0_proprio-state"], (full_obs["object-state"]))
+                flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["robot0_eef_quat"],
+                        full_obs["robot0_gripper_qpos"], full_obs["robot0_gripper_qvel"], full_obs["object-state"]))
                 action = eval_policy_net.get_action(flat_obs)
                 
                 video_path = FLAGS.video_path + f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_video.mp4"
@@ -189,7 +190,8 @@ def main(_):
                     obs, reward, done, _ = eval_env.step(action)
                     # eval_env.render()
                     # compute next action
-                    flat_obs = np.append(full_obs["robot0_proprio-state"], (full_obs["object-state"]))
+                    flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["robot0_eef_quat"],
+                        full_obs["robot0_gripper_qpos"], full_obs["robot0_gripper_qvel"], full_obs["object-state"]))
                     action = eval_policy_net.get_action(flat_obs)
 
                     # dump a frame from every K frames

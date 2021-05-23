@@ -71,7 +71,8 @@ def generate_episode_transitions(demo_info):
         # env.render()
         observations.append(observation)
 
-    flat_observations = [np.append(observation["robot0_proprio-state"], (observation["object-state"]))
+    flat_observations = [np.concatenate((observation["robot0_eef_pos"], observation["robot0_eef_quat"],
+                        observation["robot0_gripper_qpos"], observation["robot0_gripper_qvel"], observation["object-state"]))
                             for observation in observations]
 
     # z

@@ -17,6 +17,8 @@ from torch import nn
 from torch import distributions
 
 from typing import cast
+import wandb
+wandb.init(project="bc-panda-lift")
 
 results_dir = "/home/mohan/research/experiments/bc/panda_lift/models/"
 demo_path = "/home/mohan/Downloads/panda_pick_up/1620492100_4904742/demo.hdf5"
@@ -27,6 +29,7 @@ flags.DEFINE_integer('train_iterations', 250000, 'number of training iterations.
 flags.DEFINE_integer('batch_size', 32, 'batch size for training update.')
 flags.DEFINE_integer('num_actors', 4, 'number of actors enacting the demonstrations.')
 flags.DEFINE_float('evaluate_factor', 1/4, 'percentage of evaluations compared to train iterations.')
+flags.DEFINE_float('log_factor', 1/100, 'percentage of logs compared to train iterations.')
 flags.DEFINE_boolean('gpu', 1, 'whether to run on a gpu.')
 flags.DEFINE_string('video_path', '/tmp/', 'where to store the rollouts.')
 
@@ -127,7 +130,7 @@ def main(_):
     ac_dim = len(action)
     n_layers = 2 # Change to 2
     size = 128
-    learning_rate = 1e-2
+    learning_rate = 1e-3
     num_train_iterations = FLAGS.train_iterations
     batch_size = FLAGS.batch_size
     eval_steps = 250
@@ -153,8 +156,10 @@ def main(_):
                         logger=loggers.TerminalLogger('training', time_delta=0.),
                         use_gpu=FLAGS.gpu)
 
+    wandb.watch(policy_network)
     # get_action method should be move to a separate actor
     evaluate_every = int(num_train_iterations * FLAGS.evaluate_factor)
+    log_every = int(num_train_iterations * FLAGS.log_factor)
 
     if FLAGS.train:
         # TODO: Convert evaluation loop to an actor
@@ -166,7 +171,10 @@ def main(_):
         eval_env = bc_robo_utils.make_eval_env(demo_path)
         
         for iter in range(num_train_iterations):
-            learner.step()
+            loss_dict = learner.step()
+            
+            if iter % log_every == 0:
+                wandb.log(loss_dict)
 
             if iter % evaluate_every == 0:
                 model_checkpoint_name = f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_net.pt"

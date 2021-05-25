@@ -92,7 +92,7 @@ class BCLearner(robolfd.Learner):
         self._optimizer.step()
 
         return {
-            'Training Loss': ptu.to_numpy(loss)
+            'loss': ptu.to_numpy(loss)
         }
 
 
@@ -105,6 +105,7 @@ class BCLearner(robolfd.Learner):
         result.update(counts)
         if counts["learner_steps"] % 10000 == 0:
             print(result)
+        return result
         # Attempt to write logs.
         # self._logger.write(result)
     

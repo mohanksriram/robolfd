@@ -71,8 +71,7 @@ def generate_episode_transitions(demo_info):
         # env.render()
         observations.append(observation)
 
-    flat_observations = [np.concatenate((observation["robot0_eef_pos"], observation["robot0_eef_quat"],
-                        observation["robot0_gripper_qpos"], observation["robot0_gripper_qvel"], observation["object-state"]))
+    flat_observations = [np.concatenate((observation["robot0_eef_pos"], observation["object-state"]))
                             for observation in observations]
 
     # z
@@ -93,7 +92,7 @@ def generate_episode_transitions(demo_info):
 def make_demonstrations(demo_path: Path, config: DemoConfig) -> ndarray:
     f = h5py.File(demo_path, "r", skip_cache=False)
 
-    episodes = list(f["data"].keys())[:config.max_episodes]
+    episodes = list(f["data"].keys())[-config.max_episodes:]
     episodes = episodes[-config.last_episode_only:]
     
     # TODO: Decide how to batch transitions across episodes
@@ -109,12 +108,13 @@ def make_demonstrations(demo_path: Path, config: DemoConfig) -> ndarray:
                        callback=lambda _: pbar.update(1)) for i in range(len(episodes))]
         transitions = [p.get() for p in res]
         pool.close()
+        pool.join()
         merged = list(itertools.chain(*transitions))
         return merged
 
 def make_eval_env(demo_path: Path, has_offscreen_renderer = True):
     f = h5py.File(demo_path, "r")
-
+    print("opened file")
     env_name = f["data"].attrs["env"]
     env_info = json.loads(f["data"].attrs["env_info"])
 

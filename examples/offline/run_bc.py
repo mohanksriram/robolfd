@@ -17,9 +17,11 @@ from torch import nn
 from torch import distributions
 
 from typing import cast
+# import wandb
+# wandb.init(project="bc-panda-lift")
 
 results_dir = "/home/mohan/research/experiments/bc/panda_lift/models/"
-demo_path = "/home/mohan/Downloads/panda_pick_up/1620492100_4904742/demo.hdf5"
+demo_path = "/home/mohan/research/experiments/bc/panda_lift/expert_demonstrations/1621926034_0051796/demo.hdf5"
 
 flags.DEFINE_boolean('train', 1, 'whether to train a model or evaluate a model')
 flags.DEFINE_integer('max_episodes', 100, 'maximum number of episodes to be used for training.')
@@ -27,9 +29,11 @@ flags.DEFINE_integer('train_iterations', 250000, 'number of training iterations.
 flags.DEFINE_integer('batch_size', 32, 'batch size for training update.')
 flags.DEFINE_integer('num_actors', 4, 'number of actors enacting the demonstrations.')
 flags.DEFINE_float('evaluate_factor', 1/4, 'percentage of evaluations compared to train iterations.')
+flags.DEFINE_float('log_factor', 1/100, 'percentage of logs compared to train iterations.')
 flags.DEFINE_boolean('gpu', 1, 'whether to run on a gpu.')
 flags.DEFINE_string('video_path', '/tmp/', 'where to store the rollouts.')
 
+flags.DEFINE_integer('hidden_size', 100, 'dimension of each hidden layer.')
 
 flags.DEFINE_integer('amp_factor', 0, 'amplification factor')
 flags.DEFINE_integer('amp_start', -80, 'start time step for range to be amplified.')
@@ -126,8 +130,8 @@ def main(_):
     ob_dim = len(obs)
     ac_dim = len(action)
     n_layers = 2 # Change to 2
-    size = 128
-    learning_rate = 1e-2
+    size = FLAGS.hidden_size
+    learning_rate = 5e-3
     num_train_iterations = FLAGS.train_iterations
     batch_size = FLAGS.batch_size
     eval_steps = 250
@@ -155,7 +159,7 @@ def main(_):
 
     # get_action method should be move to a separate actor
     evaluate_every = int(num_train_iterations * FLAGS.evaluate_factor)
-
+    log_every = int(num_train_iterations * FLAGS.log_factor)
     if FLAGS.train:
         # TODO: Convert evaluation loop to an actor
         eval_policy_net = PolicyNet(
@@ -164,12 +168,14 @@ def main(_):
                         n_layers=n_layers,
                         size=size)
         eval_env = bc_robo_utils.make_eval_env(demo_path)
-        
         for iter in range(num_train_iterations):
-            learner.step()
+            loss_dict = learner.step()
+            
+            # if iter % log_every == 0:
+            #     wandb.log(loss_dict)
 
             if iter % evaluate_every == 0:
-                model_checkpoint_name = f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_net.pt"
+                model_checkpoint_name = f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_{FLAGS.hidden_size}hs_net.pt"
                 learner.save(results_dir + model_checkpoint_name)
 
                 eval_policy_net.load_state_dict(torch.load(results_dir + model_checkpoint_name))
@@ -177,11 +183,10 @@ def main(_):
 
                 # TODO: Move evaluation code to appropriate file
                 full_obs = eval_env.reset()
-                flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["robot0_eef_quat"],
-                        full_obs["robot0_gripper_qpos"], full_obs["robot0_gripper_qvel"], full_obs["object-state"]))
+                flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["object-state"]))
                 action = eval_policy_net.get_action(flat_obs)
                 
-                video_path = FLAGS.video_path + f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_video.mp4"
+                video_path = FLAGS.video_path + f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_{FLAGS.hidden_size}hs_video.mp4"
                 # create a video writer with imageio
                 writer = imageio.get_writer(video_path, fps=20)
 
@@ -190,8 +195,7 @@ def main(_):
                     obs, reward, done, _ = eval_env.step(action)
                     # eval_env.render()
                     # compute next action
-                    flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["robot0_eef_quat"],
-                        full_obs["robot0_gripper_qpos"], full_obs["robot0_gripper_qvel"], full_obs["object-state"]))
+                    flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["object-state"]))
                     action = eval_policy_net.get_action(flat_obs)
 
                     # dump a frame from every K frames

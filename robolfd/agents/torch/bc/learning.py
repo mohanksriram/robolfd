@@ -13,6 +13,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch import optim
+from torch.optim.lr_scheduler import StepLR
 
 
 class BCLearner(robolfd.Learner):
@@ -30,6 +31,7 @@ class BCLearner(robolfd.Learner):
                  logger: loggers.Logger,
                  batch_size = 32,
                  use_gpu = 1,
+                 update_network = True,
                  checkpoint: bool = True):
         """Intializes the learner.
 
@@ -64,7 +66,8 @@ class BCLearner(robolfd.Learner):
                 itertools.chain([self._network.logstd], self._network.mean_net.parameters()),
                 self._learning_rate
             )
-        
+        self._scheduler = StepLR(self._optimizer, step_size=200, gamma=1)
+        self._update = update_network
         #TODO
         self._variables = None
         self._num_steps = 0
@@ -73,26 +76,34 @@ class BCLearner(robolfd.Learner):
         # Create a snapshotter object.
         self._snapshotter = None
 
-    def _step(self):
-        self._optimizer.zero_grad()
+    def _step(self, ignore_last_dim=True):
+        if self._update:
+            self._network.train()
+            self._optimizer.zero_grad()
+        else:
+            self._network.eval()
+
         transitions: Transition = self.sample_bs()
+
         observations = transitions[0]
         device = torch.device('cuda:0') if self._use_gpu else 'cpu'
         torch_observations = torch.tensor(observations, device=device, dtype=torch.float)
-
         torch_actions = torch.tensor(
             transitions[1], device=device,
             dtype=torch.int if self._discrete else torch.float)
 
-        action_distribution = self._network(torch_observations)
-        
+        action_distributions = self._network(torch_observations)
         # Loss is proportional to the negative log-likelihood.
-        loss = -action_distribution.log_prob(torch_actions).mean()
-        loss.backward()
-        self._optimizer.step()
+        loss = -action_distributions.log_prob(torch_actions).mean()
+        
+        if self._update:
+            loss.backward()
+            self._optimizer.step()
+            self._scheduler.step()
 
+        loss_name = 'train_loss' if self._update else 'val_loss'
         return {
-            'loss': ptu.to_numpy(loss)
+            loss_name: ptu.to_numpy(loss)
         }
 
 

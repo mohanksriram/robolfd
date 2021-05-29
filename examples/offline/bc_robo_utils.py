@@ -17,19 +17,14 @@ from multiprocessing import Pool
 
 @dataclass
 class DemoConfig:
-    amp_factor: int
-    amp_start: int
-    amp_end: int
-    last_episode_only: int
     max_episodes: int
     num_workers: int
 
     def __str__(self) -> str:
-        return f"my config, amp_factor: {self.amp_factor}, amp_start: {self.amp_start}, amp_end: {self.amp_end}, last_episode_only: {self.last_episode_only}"
+        return f"my config, max_episodes: {self.max_episodes}, num_workers: {self.num_workers}"
 
 def generate_episode_transitions(demo_info):
     f, episode_num, config = demo_info
-    # f = h5py.File(demo_path, "r")
     
     episodes = list(f["data"].keys())
     episode = episodes[episode_num]
@@ -71,20 +66,12 @@ def generate_episode_transitions(demo_info):
         # env.render()
         observations.append(observation)
 
-    flat_observations = [np.concatenate((observation["robot0_eef_pos"], observation["object-state"]))
+    flat_observations = [np.concatenate((observation["robot0_eef_pos"], observation["robot0_eef_quat"], observation["object-state"]))
                             for observation in observations]
 
     # z
     all_observations.extend(flat_observations)
     all_actions.extend(actions)
-
-    if config.amp_factor > 0:
-        amplified_observations = config.amp_factor*flat_observations[-config.amp_start: -config.amp_end]
-        amplified_actions = config.amp_factor*actions[-config.amp_start: -config.amp_end]
-
-        # duplicate last few transitions to include more gripper closing action.
-        all_observations.extend(amplified_observations)
-        all_actions.extend(amplified_actions)
 
     return list(zip(all_observations, all_actions))
 
@@ -92,9 +79,7 @@ def generate_episode_transitions(demo_info):
 def make_demonstrations(demo_path: Path, config: DemoConfig) -> ndarray:
     f = h5py.File(demo_path, "r", skip_cache=False)
 
-    episodes = list(f["data"].keys())[-config.max_episodes:]
-    episodes = episodes[-config.last_episode_only:]
-    
+    episodes = list(f["data"].keys())[:config.max_episodes]    
     # TODO: Decide how to batch transitions across episodes
     # Dataset is collected in the form of transitions.
     pbar = tqdm(total=len(episodes))
@@ -109,15 +94,13 @@ def make_demonstrations(demo_path: Path, config: DemoConfig) -> ndarray:
         transitions = [p.get() for p in res]
         pool.close()
         pool.join()
-        merged = list(itertools.chain(*transitions))
-        return merged
+        return transitions
 
-def make_eval_env(demo_path: Path, has_offscreen_renderer = True):
+def make_eval_env(demo_path: Path, robot_name="Panda", has_offscreen_renderer = True):
     f = h5py.File(demo_path, "r")
-    print("opened file")
     env_name = f["data"].attrs["env"]
     env_info = json.loads(f["data"].attrs["env_info"])
-
+    env_info['robots'] = robot_name
     
     env = robosuite.make(
         **env_info,

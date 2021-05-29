@@ -12,32 +12,42 @@ from absl import app
 from absl import flags
 import imageio
 import numpy as np
+import pathlib
 import torch
 from torch import nn
 from torch import distributions
 
+import itertools
+import sys
 from typing import cast
-# import wandb
-# wandb.init(project="bc-panda-lift")
+import wandb
+
+wandb.init(project="bc-panda-lift")
 
 results_dir = "/home/mohan/research/experiments/bc/panda_lift/models/"
-demo_path = "/home/mohan/research/experiments/bc/panda_lift/expert_demonstrations/1621926034_0051796/demo.hdf5"
+demo_path = "/home/mohan/research/experiments/bc/panda_lift/expert_demonstrations/1622106811_9832993/demo.hdf5"
+traj_path = "/home/mohan/research/experiments/bc/panda_lift/trajectories/"
+traj_fname = "trajectories.npy"
 
-flags.DEFINE_boolean('train', 1, 'whether to train a model or evaluate a model')
+
 flags.DEFINE_integer('max_episodes', 100, 'maximum number of episodes to be used for training.')
-flags.DEFINE_integer('train_iterations', 250000, 'number of training iterations.')
-flags.DEFINE_integer('batch_size', 32, 'batch size for training update.')
-flags.DEFINE_integer('num_actors', 4, 'number of actors enacting the demonstrations.')
-flags.DEFINE_float('evaluate_factor', 1/4, 'percentage of evaluations compared to train iterations.')
+flags.DEFINE_integer('num_actors', 10, 'number of actors enacting the demonstrations.')
+flags.DEFINE_float('valid_pct', 0.2, 'percentage of episodes to be used for validation.')
+flags.DEFINE_boolean('train', 1, 'whether to train a model or evaluate a model')
+
+flags.DEFINE_integer('batch_size', 1024, 'batch size for training update.')
+flags.DEFINE_integer('hidden_size', 128, 'dimension of each hidden layer.')
+flags.DEFINE_float('lr', 1e-3, 'learning rate.')
+flags.DEFINE_integer('n_layers', 2, 'number of hidden layers.')
+flags.DEFINE_integer('train_iterations', 1000, 'number of training iterations.')
+
+flags.DEFINE_float('evaluate_factor', 1/2, 'percentage of evaluations compared to train iterations.')
 flags.DEFINE_float('log_factor', 1/100, 'percentage of logs compared to train iterations.')
+
+flags.DEFINE_bool('cache_obs', False, 'whether to cache observations for reuse.')
 flags.DEFINE_boolean('gpu', 1, 'whether to run on a gpu.')
 flags.DEFINE_string('video_path', '/tmp/', 'where to store the rollouts.')
 
-flags.DEFINE_integer('hidden_size', 100, 'dimension of each hidden layer.')
-
-flags.DEFINE_integer('amp_factor', 0, 'amplification factor')
-flags.DEFINE_integer('amp_start', -80, 'start time step for range to be amplified.')
-flags.DEFINE_integer('amp_end', -20, 'start time step for range to be amplified.')
 
 import time
 
@@ -104,10 +114,11 @@ class PolicyNet(nn.Module):
 
         observation_tensor = torch.tensor(observation, dtype=torch.float).to(ptu.device)
         action_distribution = self.forward(observation_tensor)
-        return cast(
+        action_with_gripper = cast(
             np.ndarray,
             action_distribution.sample().cpu().detach().numpy(),
         )[0]
+        return action_with_gripper
 
 FLAGS = flags.FLAGS
 
@@ -118,29 +129,46 @@ def main(_):
         ptu.init_gpu()
 
     # TODO: Save demonstrations in reverb
-    demo_config = bc_robo_utils.DemoConfig(FLAGS.amp_factor, FLAGS.amp_start,
-                  FLAGS.amp_end, not FLAGS.train, FLAGS.max_episodes, FLAGS.num_actors)
-    dataset = bc_robo_utils.make_demonstrations(demo_path, demo_config)
-    # dataset = zip(*dataset)
+    demo_config = bc_robo_utils.DemoConfig(FLAGS.max_episodes, FLAGS.num_actors)
+    
+    # Check if observations are already part of a file
+    file = pathlib.Path(traj_path + traj_fname)
+    expert_trajectories = None
+    if file.exists() and FLAGS.cache_obs:
+        print("loading demonstrations from file")
+        expert_trajectories = np.load(file, allow_pickle=True)
+    else:
+        print("generating demonstrations")
+        expert_trajectories = bc_robo_utils.make_demonstrations(demo_path, demo_config)
+        np.save(file, expert_trajectories, allow_pickle=True)
+
+    valid_idx = int((1-FLAGS.valid_pct) * len(expert_trajectories))
+    train_trajectories = expert_trajectories[:valid_idx]
+    val_trajectories = expert_trajectories[valid_idx:]
+
+    # Merge trajectories into transitions
+    train_transitions = list(itertools.chain(*train_trajectories))
+    val_transitions = list(itertools.chain(*val_trajectories))
+
     demo_time = time.time()
-
     print(f"demo took {demo_time-start} seconds.")
-
-    obs, action = dataset[0]
+    
+    print(f"len train_transitions: {len(train_transitions)}, val_transitions: {len(val_transitions)}")
+    obs, action = train_transitions[0]
     ob_dim = len(obs)
     ac_dim = len(action)
-    n_layers = 2 # Change to 2
+    print(f"obs dim: {ob_dim}, action dim: {ac_dim}")
+    n_layers = FLAGS.n_layers # Change to 2
     size = FLAGS.hidden_size
-    learning_rate = 5e-3
+    learning_rate = FLAGS.lr
     num_train_iterations = FLAGS.train_iterations
     batch_size = FLAGS.batch_size
     eval_steps = 250
-
+ 
     counter = counting.Counter()
+    eval_counter = counting.Counter()
     learner_counter = counting.Counter(counter, prefix='learner')
-
-    print(f"len of generated dataset: {len(dataset)}")
-
+    eval_learner_counter = counting.Counter(eval_counter, prefix='learner')
 
     # Create the networks
     policy_network = PolicyNet(
@@ -151,11 +179,21 @@ def main(_):
     policy_network.train()
     learner = bc.BCLearner(network=policy_network,
                         learning_rate=learning_rate,
-                        dataset=dataset,
+                        dataset=train_transitions,
                         batch_size=batch_size, 
                         counter=learner_counter, 
                         logger=loggers.TerminalLogger('training', time_delta=0.),
                         use_gpu=FLAGS.gpu)
+    
+    eval_learner = bc.BCLearner(network=policy_network,
+                        learning_rate=learning_rate,
+                        dataset=val_transitions,
+                        batch_size=batch_size, 
+                        counter=eval_learner_counter, 
+                        logger=loggers.TerminalLogger('validation', time_delta=0.),
+                        use_gpu=FLAGS.gpu,
+                        update_network=False
+                        )
 
     # get_action method should be move to a separate actor
     evaluate_every = int(num_train_iterations * FLAGS.evaluate_factor)
@@ -168,14 +206,15 @@ def main(_):
                         n_layers=n_layers,
                         size=size)
         eval_env = bc_robo_utils.make_eval_env(demo_path)
-        for iter in range(num_train_iterations):
-            loss_dict = learner.step()
+        for iter in range(num_train_iterations+1):
+            train_loss_dict = learner.step()
+            eval_loss_dict = eval_learner.step()
             
-            # if iter % log_every == 0:
-            #     wandb.log(loss_dict)
+            if iter % log_every == 0:
+                wandb.log({**train_loss_dict, **eval_loss_dict})
 
             if iter % evaluate_every == 0:
-                model_checkpoint_name = f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_{FLAGS.hidden_size}hs_net.pt"
+                model_checkpoint_name = f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_{FLAGS.hidden_size}hs_{n_layers}hl_net.pt"
                 learner.save(results_dir + model_checkpoint_name)
 
                 eval_policy_net.load_state_dict(torch.load(results_dir + model_checkpoint_name))
@@ -183,10 +222,10 @@ def main(_):
 
                 # TODO: Move evaluation code to appropriate file
                 full_obs = eval_env.reset()
-                flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["object-state"]))
+                flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["robot0_eef_quat"], full_obs["object-state"]))
                 action = eval_policy_net.get_action(flat_obs)
                 
-                video_path = FLAGS.video_path + f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_{FLAGS.hidden_size}hs_video.mp4"
+                video_path = FLAGS.video_path + f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_{FLAGS.hidden_size}hs_{n_layers}hl_video.mp4"
                 # create a video writer with imageio
                 writer = imageio.get_writer(video_path, fps=20)
 
@@ -195,7 +234,7 @@ def main(_):
                     obs, reward, done, _ = eval_env.step(action)
                     # eval_env.render()
                     # compute next action
-                    flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["object-state"]))
+                    flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["robot0_eef_quat"], full_obs["object-state"]))
                     action = eval_policy_net.get_action(flat_obs)
 
                     # dump a frame from every K frames

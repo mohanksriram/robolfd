@@ -22,7 +22,7 @@ import sys
 from typing import cast
 import wandb
 
-wandb.init(project="bc-panda-lift")
+run = wandb.init(project="bc-panda-lift")
 
 results_dir = "/home/mohan/research/experiments/bc/panda_lift/models/"
 demo_path = "/home/mohan/research/experiments/bc/panda_lift/expert_demonstrations/1622106811_9832993/demo.hdf5"
@@ -41,7 +41,7 @@ flags.DEFINE_float('lr', 1e-3, 'learning rate.')
 flags.DEFINE_integer('n_layers', 2, 'number of hidden layers.')
 flags.DEFINE_integer('train_iterations', 1000, 'number of training iterations.')
 
-flags.DEFINE_float('evaluate_factor', 1/2, 'percentage of evaluations compared to train iterations.')
+flags.DEFINE_float('evaluate_factor', 1/10, 'percentage of evaluations compared to train iterations.')
 flags.DEFINE_float('log_factor', 1/100, 'percentage of logs compared to train iterations.')
 
 flags.DEFINE_bool('cache_obs', False, 'whether to cache observations for reuse.')
@@ -222,7 +222,7 @@ def main(_):
 
                 # TODO: Move evaluation code to appropriate file
                 full_obs = eval_env.reset()
-                flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["robot0_eef_quat"], full_obs["object-state"]))
+                flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["robot0_eef_quat"], full_obs["robot0_gripper_qpos"], full_obs["object-state"]))
                 action = eval_policy_net.get_action(flat_obs)
                 
                 video_path = FLAGS.video_path + f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_{FLAGS.hidden_size}hs_{n_layers}hl_video.mp4"
@@ -234,7 +234,7 @@ def main(_):
                     obs, reward, done, _ = eval_env.step(action)
                     # eval_env.render()
                     # compute next action
-                    flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["robot0_eef_quat"], full_obs["object-state"]))
+                    flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["robot0_eef_quat"], full_obs["robot0_gripper_qpos"], full_obs["object-state"]))
                     action = eval_policy_net.get_action(flat_obs)
 
                     # dump a frame from every K frames
@@ -248,6 +248,7 @@ def main(_):
 
         training_time = time.time()
         print(f"training took {training_time-demo_time} seconds.")
+    run.finish()
 
 if __name__ == '__main__':
   app.run(main)

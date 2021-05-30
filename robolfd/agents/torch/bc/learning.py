@@ -66,7 +66,7 @@ class BCLearner(robolfd.Learner):
                 itertools.chain([self._network.logstd], self._network.mean_net.parameters()),
                 self._learning_rate
             )
-        self._scheduler = StepLR(self._optimizer, step_size=200, gamma=1)
+        self._scheduler = StepLR(self._optimizer, step_size=1000, gamma=1)
         self._update = update_network
         #TODO
         self._variables = None
@@ -114,7 +114,7 @@ class BCLearner(robolfd.Learner):
         # Update our counts and record it.
         counts = self._counter.increment(steps=1)
         result.update(counts)
-        if counts["learner_steps"] % 10000 == 0:
+        if counts["learner_steps"] % 100000 == 0:
             print(result)
         return result
         # Attempt to write logs.

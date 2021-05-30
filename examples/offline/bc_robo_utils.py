@@ -60,18 +60,30 @@ def generate_episode_transitions(demo_info):
     env.sim.forward()
 
     observations = []
-    for j, action in enumerate(actions):
-        observation, reward, done, misc = env.step(action)
-        # use when you want to evaluate the environment
-        # env.render()
-        observations.append(observation)
+    action = [0, 0, 0, -1]
+    observation, _, _, _ = env.step(action)
+    # observe the current state
+    observations.append(observation)
 
-    flat_observations = [np.concatenate((observation["robot0_eef_pos"], observation["robot0_eef_quat"], observation["object-state"]))
+    used_actions = []
+    # Fix the order of action, observation sampling problem here
+    for j, action in enumerate(actions):
+        if not (action == [0, 0, 0, -1]).all():
+            action = np.clip(action, -1, 1)
+            observation, reward, done, misc = env.step(action)
+            # use when you want to evaluate the environment
+            # env.render()
+            used_actions.append(action)
+            observations.append(observation)
+    # repeat last action for last observation
+    used_actions.append(actions[-1])
+
+    flat_observations = [np.concatenate((observation["robot0_eef_pos"], observation["robot0_eef_quat"], observation["robot0_gripper_qpos"], observation["object-state"]))
                             for observation in observations]
 
     # z
     all_observations.extend(flat_observations)
-    all_actions.extend(actions)
+    all_actions.extend(used_actions)
 
     return list(zip(all_observations, all_actions))
 

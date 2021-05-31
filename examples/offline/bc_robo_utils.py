@@ -78,9 +78,9 @@ def generate_episode_transitions(demo_info):
     # repeat last action for last observation
     used_actions.append(actions[-1])
 
-    flat_observations = [np.concatenate([observation[key]])
-                        for observation in observations for key in config.obs_keys]
-
+    flat_observations = []
+    for observation in observations:
+        flat_observations.append(np.concatenate([observation[key] for key in config.obs_keys]))
     # z
     all_observations.extend(flat_observations)
     all_actions.extend(used_actions)

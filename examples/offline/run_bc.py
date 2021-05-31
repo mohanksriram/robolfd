@@ -2,7 +2,7 @@ from robolfd.agents.torch.bc import learning
 import robolfd
 from robolfd import types
 from robolfd.agents.torch import bc
-# from robolfd.agents.torch import actors
+from robolfd.torch.networks import MLP
 from robolfd.utils import pytorch_util as ptu
 from robolfd.utils import counting
 from robolfd.utils import loggers
@@ -14,11 +14,8 @@ import imageio
 import numpy as np
 import pathlib
 import torch
-from torch import nn
-from torch import distributions
 
 import itertools
-import sys
 from typing import cast
 import wandb
 
@@ -47,78 +44,10 @@ flags.DEFINE_float('log_factor', 1/100, 'percentage of logs compared to train it
 flags.DEFINE_bool('cache_obs', False, 'whether to cache observations for reuse.')
 flags.DEFINE_boolean('gpu', 1, 'whether to run on a gpu.')
 flags.DEFINE_string('video_path', '/tmp/', 'where to store the rollouts.')
-
+flags.DEFINE_list('obs_keys', ['object-state'],
+                  'list of keys to include as part of the observation.')
 
 import time
-
-#TODO: Move policy net to a separate neural network module
-class PolicyNet(nn.Module):
-
-    def __init__(self,
-                ac_dim,
-                ob_dim,
-                n_layers,
-                size,
-                discrete=False,
-                training=True,
-                nn_baseline=False,
-                **kwargs):
-        super().__init__(**kwargs)
-
-        # init vars
-        self.ac_dim = ac_dim
-        self.ob_dim = ob_dim
-        self.n_layers = n_layers
-        self.discrete = discrete
-        self.size = size
-        self.training = training
-        self.nn_baseline = nn_baseline
-
-        if self.discrete:
-            self.logits_na = ptu.build_mlp(
-                input_size=self.ob_dim,
-                output_size=self.ac_dim,
-                n_layers=self.n_layers,
-                size=self.size,
-            )
-            self.logits_na.to(ptu.device)
-            self.mean_net = None
-            self.logstd = None
-        else:
-            self.logits_na = None
-            self.mean_net = ptu.build_mlp(
-                input_size=self.ob_dim,
-                output_size=self.ac_dim,
-                n_layers=self.n_layers, size=self.size,
-            )
-            self.mean_net.to(ptu.device)
-            self.logstd = nn.Parameter(
-                torch.zeros(self.ac_dim, dtype=torch.float32, device=ptu.device)
-            )
-            self.logstd.to(ptu.device)
-
-    def forward(self, observation: torch.Tensor) -> distributions.Distribution:
-        if self.discrete:
-            return distributions.Categorical(logits=self.logits_na(observation))
-        else:
-            return distributions.Normal(
-                self.mean_net(observation),
-                torch.exp(self.logstd)[None],
-            )
-
-    def get_action(self, obs: np.ndarray) -> np.ndarray:
-        if len(obs.shape) > 1:
-            observation = obs
-        else:
-            observation = obs[None]
-
-        observation_tensor = torch.tensor(observation, dtype=torch.float).to(ptu.device)
-        action_distribution = self.forward(observation_tensor)
-        action_with_gripper = cast(
-            np.ndarray,
-            action_distribution.sample().cpu().detach().numpy(),
-        )[0]
-        return action_with_gripper
 
 FLAGS = flags.FLAGS
 
@@ -129,7 +58,7 @@ def main(_):
         ptu.init_gpu()
 
     # TODO: Save demonstrations in reverb
-    demo_config = bc_robo_utils.DemoConfig(FLAGS.max_episodes, FLAGS.num_actors)
+    demo_config = bc_robo_utils.DemoConfig(FLAGS.obs_keys, FLAGS.max_episodes, FLAGS.num_actors)
     
     # Check if observations are already part of a file
     file = pathlib.Path(traj_path + traj_fname)
@@ -171,9 +100,9 @@ def main(_):
     eval_learner_counter = counting.Counter(eval_counter, prefix='learner')
 
     # Create the networks
-    policy_network = PolicyNet(
-                    ac_dim=ac_dim,
-                    ob_dim=ob_dim,
+    policy_network = MLP(
+                    in_dim=ob_dim,
+                    out_dim=ac_dim,
                     n_layers=n_layers,
                     size=size)
     policy_network.train()
@@ -198,14 +127,16 @@ def main(_):
     # get_action method should be move to a separate actor
     evaluate_every = int(num_train_iterations * FLAGS.evaluate_factor)
     log_every = int(num_train_iterations * FLAGS.log_factor)
+    
     if FLAGS.train:
         # TODO: Convert evaluation loop to an actor
-        eval_policy_net = PolicyNet(
-                        ac_dim=ac_dim,
-                        ob_dim=ob_dim,
+        eval_policy_net = MLP(
+                        in_dim=ob_dim,
+                        out_dim=ac_dim,
                         n_layers=n_layers,
                         size=size)
         eval_env = bc_robo_utils.make_eval_env(demo_path)
+        
         for iter in range(num_train_iterations+1):
             train_loss_dict = learner.step()
             eval_loss_dict = eval_learner.step()
@@ -222,9 +153,8 @@ def main(_):
 
                 # TODO: Move evaluation code to appropriate file
                 full_obs = eval_env.reset()
-                flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["robot0_eef_quat"], full_obs["robot0_gripper_qpos"], full_obs["object-state"]))
+                flat_obs = np.concatenate([full_obs[key] for key in FLAGS.obs_keys])
                 action = eval_policy_net.get_action(flat_obs)
-                
                 video_path = FLAGS.video_path + f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_{FLAGS.hidden_size}hs_{n_layers}hl_video.mp4"
                 # create a video writer with imageio
                 writer = imageio.get_writer(video_path, fps=20)
@@ -232,9 +162,8 @@ def main(_):
                 for i in range(eval_steps):
                     # act and observe
                     obs, reward, done, _ = eval_env.step(action)
-                    # eval_env.render()
                     # compute next action
-                    flat_obs = np.concatenate((full_obs["robot0_eef_pos"], full_obs["robot0_eef_quat"], full_obs["robot0_gripper_qpos"], full_obs["object-state"]))
+                    flat_obs = np.concatenate([full_obs[key] for key in FLAGS.obs_keys])
                     action = eval_policy_net.get_action(flat_obs)
 
                     # dump a frame from every K frames

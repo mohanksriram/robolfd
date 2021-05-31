@@ -1,6 +1,7 @@
 import itertools
 
 from numpy.random import sample
+from torch.nn.modules.loss import MSELoss
 from robolfd.types import Transition
 from typing import List
 
@@ -62,10 +63,16 @@ class BCLearner(robolfd.Learner):
             self._optimizer = optim.Adam(self._network.logits_na.parameters(),
                                             self._learning_rate)
         else:
-            self._optimizer = optim.Adam(
-                itertools.chain([self._network.logstd], self._network.mean_net.parameters()),
-                self._learning_rate
-            )
+            if not self._network.deterministic:
+                self._optimizer = optim.Adam(
+                    itertools.chain([self._network.logstd], self._network.mean_net.parameters()),
+                    self._learning_rate
+                )
+            else:
+                self._optimizer = optim.Adam(
+                    self._network.mean_net.parameters(),
+                    self._learning_rate
+                )
         self._scheduler = StepLR(self._optimizer, step_size=1000, gamma=1)
         self._update = update_network
         #TODO
@@ -92,10 +99,15 @@ class BCLearner(robolfd.Learner):
             transitions[1], device=device,
             dtype=torch.int if self._discrete else torch.float)
 
-        action_distributions = self._network(torch_observations)
+        loss = None
+        if not self._network.deterministic:
+            action_distributions = self._network(torch_observations)
         # Loss is proportional to the negative log-likelihood.
-        loss = -action_distributions.log_prob(torch_actions).mean()
-        
+            loss = -action_distributions.log_prob(torch_actions).mean()
+        else:
+            pred_actions = self._network(torch_observations)
+            loss_fun = nn.MSELoss()
+            loss = loss_fun(pred_actions, torch_actions)
         if self._update:
             loss.backward()
             self._optimizer.step()

@@ -17,11 +17,11 @@ from multiprocessing import Pool
 
 @dataclass
 class DemoConfig:
+    obs_keys: dict
     max_episodes: int
     num_workers: int
-
     def __str__(self) -> str:
-        return f"my config, max_episodes: {self.max_episodes}, num_workers: {self.num_workers}"
+        return f"demo config - observation keys: {self.obs_keys} max_episodes: {self.max_episodes}, num_workers: {self.num_workers}"
 
 def generate_episode_transitions(demo_info):
     f, episode_num, config = demo_info
@@ -78,8 +78,8 @@ def generate_episode_transitions(demo_info):
     # repeat last action for last observation
     used_actions.append(actions[-1])
 
-    flat_observations = [np.concatenate((observation["robot0_eef_pos"], observation["robot0_eef_quat"], observation["robot0_gripper_qpos"], observation["object-state"]))
-                            for observation in observations]
+    flat_observations = [np.concatenate([observation[key]])
+                        for observation in observations for key in config.obs_keys]
 
     # z
     all_observations.extend(flat_observations)

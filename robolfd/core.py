@@ -37,39 +37,6 @@ class Actor(abc.ABC):
   def select_action(self, observation: types.NestedArray) -> types.NestedArray:
     """Samples from the policy and returns an action."""
 
-  @abc.abstractmethod
-  def observe_first(self, timestep: types.TimeStep):
-    """Make a first observation from the environment.
-
-    Note that this need not be an initial state, it is merely beginning the
-    recording of a trajectory.
-
-    Args:
-      timestep: first timestep.
-    """
-
-  @abc.abstractmethod
-  def observe(
-      self,
-      action: types.NestedArray,
-      next_timestep: types.TimeStep,
-  ):
-    """Make an observation of timestep data from the environment.
-
-    Args:
-      action: action taken in the environment.
-      next_timestep: timestep produced by the environment given the action.
-    """
-
-  @abc.abstractmethod
-  def update(self, wait: bool = False):
-    """Perform an update of the actor parameters from past observations.
-
-    Args:
-      wait: if True, the update will be blocking.
-    """
-
-
 class VariableSource(abc.ABC):
   """Abstract source of variables.
   Objects which implement this interface provide a source of variables, returned

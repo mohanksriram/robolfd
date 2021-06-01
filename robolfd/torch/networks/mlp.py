@@ -64,22 +64,3 @@ class MLP(nn.Module):
                 )
             else:
                 return self.mean_net(observation)
-
-    # move to the agent
-    def get_action(self, obs: np.ndarray) -> np.ndarray:
-        if len(obs.shape) > 1:
-            observation = obs
-        else:
-            observation = obs[None]
-
-        observation_tensor = torch.tensor(observation, dtype=torch.float).to(ptu.device)
-        if not self.deterministic:
-            action_distribution = self.forward(observation_tensor)
-            action = cast(
-                np.ndarray,
-                action_distribution.sample().cpu().detach().numpy(),
-            )[0]
-        else:
-            action = self.forward(observation_tensor)
-            action = ptu.to_numpy(action)[0]
-        return action

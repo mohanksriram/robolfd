@@ -1,4 +1,7 @@
+from robolfd.agents.torch import actors
 from examples.offline import bc_robo_utils
+from examples.offline.run_bc import FLAGS
+from robolfd.torch.networks import MLP
 
 from absl import app
 from absl import flags
@@ -6,8 +9,6 @@ import imageio
 import numpy as np
 import torch
 
-from examples.offline.run_bc import FLAGS
-from robolfd.torch.networks import MLP
 import time
 from tqdm import tqdm
 from typing import cast
@@ -15,7 +16,7 @@ from typing import cast
 experiment_name="models"
 
 demo_path = "/home/mohan/research/experiments/bc/panda_lift/expert_demonstrations/1622106811_9832993/demo.hdf5"
-model_path = f"/home/mohan/research/experiments/bc/panda_lift/{experiment_name}/50episodes__180steps_2048bs_128hs_2hl_net.pt"
+model_path = f"/home/mohan/research/experiments/bc/panda_lift/{experiment_name}/50episodes__200steps_2048bs_128hs_2hl_net.pt"
 video_path = "/home/mohan/research/experiments/bc/panda_lift/eval_rollouts/"
 
 flags.DEFINE_integer('n_runs', 4, 'number of runs.')
@@ -32,7 +33,7 @@ def main(_):
 
         # create evaluation network
         eval_policy_net = MLP(
-                        in_dim=10,
+                        in_dim=19,
                         out_dim=4, # should be changed according to experiment
                         n_layers=2,
                         size=128)
@@ -40,8 +41,9 @@ def main(_):
         # load saved model
         eval_policy_net.load_state_dict(torch.load(model_path))
         eval_policy_net.eval()
+        eval_actor = actors.FeedForwardActor(eval_policy_net)
 
-        obs_keys = ['object-state']
+        obs_keys = ['robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos', 'object-state']
 
         print(f"model loaded successfully")
         eval_steps = 250
@@ -51,7 +53,7 @@ def main(_):
             # run and save the eval_rollouts
             full_obs = eval_env.reset()
             flat_obs = np.concatenate([full_obs[key] for key in obs_keys])
-            action = eval_policy_net.get_action(flat_obs)
+            action = eval_actor.select_action(flat_obs)
 
             cur_path = video_path + f"eval_run_{experiment_name}_{robot_name}_{run}.mp4"
             # create a video writer with imageio
@@ -63,7 +65,7 @@ def main(_):
                 # eval_env.render()
                 # compute next action
                 flat_obs = np.concatenate([full_obs[key] for key in obs_keys])
-                action = eval_policy_net.get_action(flat_obs)
+                action = eval_actor.select_action(flat_obs)
 
                 # dump a frame from every K frames
                 if i % 1 == 0:

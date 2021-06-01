@@ -1,11 +1,10 @@
-from robolfd.agents.torch.bc import learning
-import robolfd
-from robolfd import types
 from robolfd.agents.torch import bc
+from robolfd.agents.torch import actors
 from robolfd.torch.networks import MLP
 from robolfd.utils import pytorch_util as ptu
 from robolfd.utils import counting
 from robolfd.utils import loggers
+
 from examples.offline import bc_robo_utils
 
 from absl import app
@@ -34,7 +33,7 @@ flags.DEFINE_boolean('train', 1, 'whether to train a model or evaluate a model')
 
 flags.DEFINE_integer('batch_size', 1024, 'batch size for training update.')
 flags.DEFINE_integer('hidden_size', 128, 'dimension of each hidden layer.')
-flags.DEFINE_float('lr', 1e-3, 'learning rate.')
+flags.DEFINE_float('lr', 5e-3, 'learning rate.')
 flags.DEFINE_integer('n_layers', 2, 'number of hidden layers.')
 flags.DEFINE_integer('train_iterations', 1000, 'number of training iterations.')
 
@@ -44,7 +43,7 @@ flags.DEFINE_float('log_factor', 1/100, 'percentage of logs compared to train it
 flags.DEFINE_bool('cache_obs', False, 'whether to cache observations for reuse.')
 flags.DEFINE_boolean('gpu', 1, 'whether to run on a gpu.')
 flags.DEFINE_string('video_path', '/tmp/', 'where to store the rollouts.')
-flags.DEFINE_list('obs_keys', ['object-state'],
+flags.DEFINE_list('obs_keys', ['robot0_proprio-state', 'object-state'],
                   'list of keys to include as part of the observation.')
 
 import time
@@ -84,6 +83,7 @@ def main(_):
     
     print(f"len train_transitions: {len(train_transitions)}, val_transitions: {len(val_transitions)}")
     obs, action = train_transitions[0]
+    print(obs)
     ob_dim = len(obs)
     ac_dim = len(action)
     print(f"obs dim: {ob_dim}, action dim: {ac_dim}")
@@ -106,6 +106,7 @@ def main(_):
                     n_layers=n_layers,
                     size=size)
     policy_network.train()
+    
     learner = bc.BCLearner(network=policy_network,
                         learning_rate=learning_rate,
                         dataset=train_transitions,
@@ -113,28 +114,28 @@ def main(_):
                         counter=learner_counter, 
                         logger=loggers.TerminalLogger('training', time_delta=0.),
                         use_gpu=FLAGS.gpu)
-    
-    eval_learner = bc.BCLearner(network=policy_network,
-                        learning_rate=learning_rate,
-                        dataset=val_transitions,
-                        batch_size=batch_size, 
-                        counter=eval_learner_counter, 
-                        logger=loggers.TerminalLogger('validation', time_delta=0.),
-                        use_gpu=FLAGS.gpu,
-                        update_network=False
-                        )
 
-    # get_action method should be move to a separate actor
+
     evaluate_every = int(num_train_iterations * FLAGS.evaluate_factor)
     log_every = int(num_train_iterations * FLAGS.log_factor)
     
     if FLAGS.train:
-        # TODO: Convert evaluation loop to an actor
+        # TODO: Convert evaluation loop to an agent
+        eval_learner = bc.BCLearner(network=policy_network,
+                            learning_rate=learning_rate,
+                            dataset=val_transitions,
+                            batch_size=batch_size, 
+                            counter=eval_learner_counter, 
+                            logger=loggers.TerminalLogger('validation', time_delta=0.),
+                            use_gpu=FLAGS.gpu,
+                            update_network=False
+                            )
         eval_policy_net = MLP(
                         in_dim=ob_dim,
                         out_dim=ac_dim,
                         n_layers=n_layers,
                         size=size)
+        eval_actor = actors.FeedForwardActor(eval_policy_net)
         eval_env = bc_robo_utils.make_eval_env(demo_path)
         
         for iter in range(num_train_iterations+1):
@@ -154,7 +155,7 @@ def main(_):
                 # TODO: Move evaluation code to appropriate file
                 full_obs = eval_env.reset()
                 flat_obs = np.concatenate([full_obs[key] for key in FLAGS.obs_keys])
-                action = eval_policy_net.get_action(flat_obs)
+                action = eval_actor.select_action(flat_obs)
                 video_path = FLAGS.video_path + f"{FLAGS.max_episodes}episodes__{iter}steps_{batch_size}bs_{FLAGS.hidden_size}hs_{n_layers}hl_video.mp4"
                 # create a video writer with imageio
                 writer = imageio.get_writer(video_path, fps=20)
@@ -164,7 +165,7 @@ def main(_):
                     obs, reward, done, _ = eval_env.step(action)
                     # compute next action
                     flat_obs = np.concatenate([full_obs[key] for key in FLAGS.obs_keys])
-                    action = eval_policy_net.get_action(flat_obs)
+                    action = eval_actor.select_action(flat_obs)
 
                     # dump a frame from every K frames
                     if i % 1 == 0:

@@ -16,7 +16,7 @@ from typing import cast
 experiment_name="models"
 
 demo_path = "/home/mohan/research/experiments/bc/panda_lift/expert_demonstrations/1622106811_9832993/demo.hdf5"
-model_path = f"/home/mohan/research/experiments/bc/panda_lift/{experiment_name}/50episodes__200steps_2048bs_128hs_2hl_net.pt"
+model_path = f"/home/mohan/research/experiments/bc/panda_lift/{experiment_name}/50episodes__1000steps_2048bs_128hs_2hl_net.pt"
 video_path = "/home/mohan/research/experiments/bc/panda_lift/eval_rollouts/"
 
 flags.DEFINE_integer('n_runs', 4, 'number of runs.')
@@ -33,7 +33,7 @@ def main(_):
 
         # create evaluation network
         eval_policy_net = MLP(
-                        in_dim=19,
+                        in_dim=42,
                         out_dim=4, # should be changed according to experiment
                         n_layers=2,
                         size=128)
@@ -43,7 +43,7 @@ def main(_):
         eval_policy_net.eval()
         eval_actor = actors.FeedForwardActor(eval_policy_net)
 
-        obs_keys = ['robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos', 'object-state']
+        obs_keys = ['robot0_proprio-state', 'object-state']
 
         print(f"model loaded successfully")
         eval_steps = 250
@@ -64,7 +64,7 @@ def main(_):
                 obs, reward, done, _ = eval_env.step(action)
                 # eval_env.render()
                 # compute next action
-                flat_obs = np.concatenate([full_obs[key] for key in obs_keys])
+                flat_obs = np.concatenate([obs[key] for key in obs_keys])
                 action = eval_actor.select_action(flat_obs)
 
                 # dump a frame from every K frames

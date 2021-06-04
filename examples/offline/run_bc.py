@@ -164,7 +164,7 @@ def main(_):
                     # act and observe
                     obs, reward, done, _ = eval_env.step(action)
                     # compute next action
-                    flat_obs = np.concatenate([full_obs[key] for key in FLAGS.obs_keys])
+                    flat_obs = np.concatenate([obs[key] for key in FLAGS.obs_keys])
                     action = eval_actor.select_action(flat_obs)
 
                     # dump a frame from every K frames

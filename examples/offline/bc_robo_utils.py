@@ -68,13 +68,12 @@ def generate_episode_transitions(demo_info):
     used_actions = []
     # Fix the order of action, observation sampling problem here
     for j, action in enumerate(actions):
-        if not (action == [0, 0, 0, -1]).all():
-            action = np.clip(action, -1, 1)
-            observation, reward, done, misc = env.step(action)
-            # use when you want to evaluate the environment
-            # env.render()
-            used_actions.append(action)
-            observations.append(observation)
+        action = np.clip(action, -1, 1)
+        observation, reward, done, misc = env.step(action)
+        # use when you want to evaluate the environment
+        # env.render()
+        used_actions.append(action)
+        observations.append(observation)
     # repeat last action for last observation
     used_actions.append(actions[-1])
 
@@ -91,7 +90,7 @@ def generate_episode_transitions(demo_info):
 def make_demonstrations(demo_path: Path, config: DemoConfig) -> ndarray:
     f = h5py.File(demo_path, "r", skip_cache=False)
 
-    episodes = list(f["data"].keys())[:config.max_episodes]    
+    episodes = list(f["data"].keys())[-config.max_episodes:]    
     # TODO: Decide how to batch transitions across episodes
     # Dataset is collected in the form of transitions.
     pbar = tqdm(total=len(episodes))

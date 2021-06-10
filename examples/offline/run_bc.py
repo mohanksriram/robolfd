@@ -21,7 +21,7 @@ import wandb
 run = wandb.init(project="bc-panda-lift")
 
 results_dir = "/home/mohan/research/experiments/bc/panda_lift/models/"
-demo_path = "/home/mohan/research/experiments/bc/panda_lift/expert_demonstrations/1622106811_9832993/demo.hdf5"
+demo_path = "/home/mohan/research/experiments/bc/panda_lift/expert_demonstrations/1623322082_6477468/demo.hdf5"
 traj_path = "/home/mohan/research/experiments/bc/panda_lift/trajectories/"
 traj_fname = "trajectories.npy"
 

@@ -15,8 +15,8 @@ from typing import cast
 
 experiment_name="models"
 
-demo_path = "/home/mohan/research/experiments/bc/panda_lift/expert_demonstrations/1622106811_9832993/demo.hdf5"
-model_path = f"/home/mohan/research/experiments/bc/panda_lift/{experiment_name}/50episodes__1000steps_2048bs_128hs_2hl_net.pt"
+demo_path = "/home/mohan/research/experiments/bc/panda_lift/expert_demonstrations/1623322082_6477468/demo.hdf5"
+model_path = f"/home/mohan/research/experiments/bc/panda_lift/{experiment_name}/75episodes__3000steps_2048bs_128hs_2hl_net.pt"
 video_path = "/home/mohan/research/experiments/bc/panda_lift/eval_rollouts/"
 
 flags.DEFINE_integer('n_runs', 4, 'number of runs.')

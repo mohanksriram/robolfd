@@ -1,1 +1,0 @@
-AssertionError: Error: Expected one single-armed robot! Got <class 'robosuite.robots.bimanual.Bimanual'> type instead.
